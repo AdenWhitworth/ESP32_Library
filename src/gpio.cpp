@@ -1,14 +1,6 @@
-/**
- * @file cppgpio.cpp
- * @brief Implementation of the CPPGPIO library for ESP32 GPIO control.
- * 
- * This file provides the implementation for GPIO input and output control classes,
- * designed to simplify the interface to the ESP32's GPIO functionality.
- */
+#include "gpio.h"
 
-#include "cppgpio.h"
-
-namespace CPPGPIO {
+namespace GPIO {
     /*================================= GpioInput ==============================*/
     
     /**
