@@ -1,9 +1,9 @@
-#ifndef CPPGPIO_H
-#define CPPGPIO_H
+#ifndef GPIO_H
+#define GPIO_H
 
 #include "driver/gpio.h"
 
-namespace CPPGPIO {
+namespace GPIO {
 
 /**
  * @brief Enumeration for GPIO output levels.
@@ -169,6 +169,6 @@ class GpioOutput: public GpioBase {
         esp_err_t setLevel(GpioLevel level);
 };
 
-} // namespace CPPGPIO
+}
 
-#endif // CPPGPIO_H
+#endif
