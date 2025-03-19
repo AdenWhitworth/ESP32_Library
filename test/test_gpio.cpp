@@ -144,6 +144,76 @@ void test_gpio_event_handler_active_low() {
     TEST_ASSERT_NOT_NULL(test_event_handler);
 }
 
+void test_gpio_custom_event_handler() {
+    GpioInput input(GPIO_NUM_11);
+    TEST_ASSERT_EQUAL(ESP_OK, input.init(GPIO_NUM_11));
+    
+    // Create a custom event loop
+    esp_event_loop_args_t loop_args = {
+        .queue_size = 5,
+        .task_name = "test_event_loop",
+        .task_priority = 5,
+        .task_stack_size = 2048,
+        .task_core_id = 0
+    };
+    
+    esp_event_loop_handle_t event_loop;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_event_loop_create(&loop_args, &event_loop));
+    
+    // Register event handler with custom event loop
+    TEST_ASSERT_EQUAL(ESP_OK, input.setEventHandler(event_loop, test_event_handler));
+    
+    // Enable interrupt
+    TEST_ASSERT_EQUAL(ESP_OK, input.enableInterrupt(GPIO_INTR_POSEDGE));
+    
+    // Wait for potential events
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Clean up
+    esp_event_loop_delete(event_loop);
+}
+
+void test_gpio_queue_handler() {
+    GpioInput input(GPIO_NUM_12);
+    TEST_ASSERT_EQUAL(ESP_OK, input.init(GPIO_NUM_12));
+    
+    // Create queue to receive GPIO events
+    QueueHandle_t gpio_queue = xQueueCreate(10, sizeof(int32_t));
+    TEST_ASSERT_NOT_NULL(gpio_queue);
+    
+    // Set queue handler
+    input.setQueueHandle(gpio_queue);
+    
+    // Enable interrupt
+    TEST_ASSERT_EQUAL(ESP_OK, input.enableInterrupt(GPIO_INTR_POSEDGE));
+    
+    // Wait for potential events
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // Clean up
+    vQueueDelete(gpio_queue);
+}
+
+void test_gpio_handler_priority() {
+    GpioInput input(GPIO_NUM_13);
+    TEST_ASSERT_EQUAL(ESP_OK, input.init(GPIO_NUM_13));
+    
+    // Create queue
+    QueueHandle_t gpio_queue = xQueueCreate(10, sizeof(int32_t));
+    TEST_ASSERT_NOT_NULL(gpio_queue);
+    
+    // Test that setting queue handler clears previous handlers
+    TEST_ASSERT_EQUAL(ESP_OK, input.setEventHandler(test_event_handler));
+    input.setQueueHandle(gpio_queue);
+    
+    // Test that setting event handler clears queue handler
+    input.setQueueHandle(gpio_queue);
+    TEST_ASSERT_EQUAL(ESP_OK, input.setEventHandler(test_event_handler));
+    
+    // Clean up
+    vQueueDelete(gpio_queue);
+}
+
 void RUN_UNITY_TESTS() {
     UNITY_BEGIN();
     
@@ -155,6 +225,9 @@ void RUN_UNITY_TESTS() {
     RUN_TEST(test_gpio_interrupt_active_low);
     RUN_TEST(test_gpio_event_handler);
     RUN_TEST(test_gpio_event_handler_active_low);
+    RUN_TEST(test_gpio_custom_event_handler);
+    RUN_TEST(test_gpio_queue_handler);
+    RUN_TEST(test_gpio_handler_priority);
     
     UNITY_END();
 }

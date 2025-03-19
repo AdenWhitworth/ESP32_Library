@@ -1,6 +1,9 @@
 #ifndef GPIO_H
 #define GPIO_H
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
 #include "driver/gpio.h"
 #include "esp_event.h"
 
@@ -43,8 +46,22 @@ namespace GPIO {
              * @return esp_err_t Status of the initialization (ESP_OK on success).
              */
             esp_err_t _init(const gpio_num_t pin, const bool activeLow);
-            bool _event_handler_set = false;  ///< Flag indicating if an event handler is registered
             static bool _interrupt_service_installed;  ///< Flag indicating if the interrupt service is installed
+
+            esp_event_handler_t _event_handle = nullptr;
+            static portMUX_TYPE _eventChangeMutex;
+
+            esp_err_t _clearEventHandlers();
+
+            struct interrupt_args {
+                const uint32_t type_tag = 0x47504941;  // "GPIA" in hex
+                bool _event_handler_set = false;
+                bool _custom_event_handler_set = false;
+                bool _queue_enabled = false;
+                gpio_num_t _pin;
+                esp_event_loop_handle_t _custom_event_loop_handle{nullptr};
+                QueueHandle_t _queue_handle {nullptr};
+            } _interrupt_args;
             
         public:
             /**
@@ -146,6 +163,10 @@ namespace GPIO {
              * @return esp_err_t Status of the operation (ESP_OK on success).
              */
             esp_err_t setEventHandler(esp_event_handler_t Gpio_e_h);
+
+            esp_err_t setEventHandler(esp_event_loop_handle_t Gpio_e_l, esp_event_handler_t Gpio_e_h);
+
+            void setQueueHandle(QueueHandle_t Gpio_e_q);
 
             /**
              * @brief Static callback function for GPIO interrupts.
