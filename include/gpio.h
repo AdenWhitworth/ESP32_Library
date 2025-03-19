@@ -157,23 +157,50 @@ namespace GPIO {
             esp_err_t enableInterrupt(gpio_int_type_t int_type);
 
             /**
-             * @brief Sets an event handler for GPIO input events.
+             * @brief Sets the default event handler for GPIO input events.
              * 
-             * @param Gpio_e_h Pointer to the event handler function.
-             * @return esp_err_t Status of the operation (ESP_OK on success).
+             * Registers an event handler for GPIO events using the default event loop.
+             * Any previously set handlers are cleared before setting the new one.
+             * This method is protected by a critical section to ensure thread safety.
+             * 
+             * @param Gpio_e_h Function pointer to the event handler. The handler should have the signature:
+             *                 void (*handler)(void* handler_args, esp_event_base_t base, int32_t id, void* event_data)
+             * @return esp_err_t ESP_OK on success, error code otherwise
+             * 
+             * @note Only one event handler (default, custom, or queue) can be active at a time.
+             *       Setting a new handler will clear any previously set handlers.
              */
             esp_err_t setEventHandler(esp_event_handler_t Gpio_e_h);
 
+            /**
+             * @brief Sets an event handler with a custom event loop for GPIO input events.
+             * 
+             * @param Gpio_e_l Handle to the custom event loop.
+             * @param Gpio_e_h Pointer to the event handler function.
+             * @return esp_err_t Status of the operation (ESP_OK on success).
+             */
             esp_err_t setEventHandler(esp_event_loop_handle_t Gpio_e_l, esp_event_handler_t Gpio_e_h);
 
+            /**
+             * @brief Sets a queue to receive GPIO input events.
+             * 
+             * This method configures a FreeRTOS queue to receive GPIO events.
+             * Setting a queue handler will clear any previously set event handlers.
+             * 
+             * @param Gpio_e_q Handle to the FreeRTOS queue that will receive events.
+             */
             void setQueueHandle(QueueHandle_t Gpio_e_q);
 
             /**
              * @brief Static callback function for GPIO interrupts.
              * 
              * This function is called when a GPIO interrupt occurs.
+             * It handles routing the interrupt to the appropriate handler:
+             * - Queue handler if enabled
+             * - Custom event loop handler if set
+             * - Default event handler if set
              * 
-             * @param arg Pointer to the pin number that triggered the interrupt.
+             * @param arg Pointer to interrupt_args structure containing handler configuration
              */
             static void IRAM_ATTR gpio_isr_callback(void* arg);
     };

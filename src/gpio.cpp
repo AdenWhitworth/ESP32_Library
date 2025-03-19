@@ -3,11 +3,30 @@
 namespace GPIO {
     /*================================= GpioInput ==============================*/
     
+    /**
+     * @brief Static flag indicating if the interrupt service routine is installed.
+     */
     bool GpioInput::_interrupt_service_installed{false};
+
+    /**
+     * @brief Mutex for protecting event handler changes across tasks/cores.
+     */
     portMUX_TYPE GpioInput::_eventChangeMutex = portMUX_INITIALIZER_UNLOCKED;
 
+    /**
+     * @brief Define the event base for GPIO input events.
+     */
     ESP_EVENT_DEFINE_BASE(INPUT_EVENTS);
 
+    /**
+     * @brief ISR callback for GPIO interrupts.
+     * 
+     * This function is called from interrupt context when a GPIO event occurs.
+     * It performs type checking and routes the event to the appropriate handler:
+     * queue, custom event loop, or default event handler.
+     * 
+     * @param args Pointer to interrupt_args structure
+     */
     void IRAM_ATTR GpioInput::gpio_isr_callback(void *args){
         auto* typed_args = reinterpret_cast<interrupt_args*>(args);
         if (typed_args->type_tag != 0x47504941) {
@@ -222,6 +241,15 @@ namespace GPIO {
         return status;
     }
 
+    /**
+     * @brief Sets the default event handler for GPIO input events.
+     * 
+     * Registers an event handler for GPIO events using the default event loop.
+     * Any previously set handlers are cleared before setting the new one.
+     * 
+     * @param Gpio_e_h Function pointer to the event handler
+     * @return esp_err_t ESP_OK on success, error code otherwise
+     */
     esp_err_t GpioInput::setEventHandler(esp_event_handler_t Gpio_e_h){
         esp_err_t status{ESP_OK};
 
@@ -240,6 +268,17 @@ namespace GPIO {
         return status;
     }
 
+    /**
+     * @brief Sets a custom event handler with a specific event loop.
+     * 
+     * Registers an event handler for GPIO events using a custom event loop.
+     * Any previously set handlers are cleared before setting the new one.
+     * This method is protected by a critical section to ensure thread safety.
+     * 
+     * @param Gpio_e_l Handle to the custom event loop
+     * @param Gpio_e_h Function pointer to the event handler
+     * @return esp_err_t ESP_OK on success, error code otherwise
+     */
     esp_err_t GpioInput::setEventHandler(esp_event_loop_handle_t Gpio_e_l, esp_event_handler_t Gpio_e_h){
         esp_err_t status{ESP_OK};
 
@@ -260,6 +299,15 @@ namespace GPIO {
         return status;
     }
 
+    /**
+     * @brief Configures a queue to receive GPIO events.
+     * 
+     * Sets up a FreeRTOS queue to receive GPIO events instead of using event handlers.
+     * Any previously set handlers are cleared. This method is protected by a
+     * critical section to ensure thread safety.
+     * 
+     * @param Gpio_e_q Handle to the FreeRTOS queue
+     */
     void GpioInput::setQueueHandle(QueueHandle_t Gpio_e_q){
         taskENTER_CRITICAL(&_eventChangeMutex);
         _clearEventHandlers();
@@ -268,6 +316,14 @@ namespace GPIO {
         taskEXIT_CRITICAL(&_eventChangeMutex);
     }
 
+    /**
+     * @brief Clears all event handlers and queue settings.
+     * 
+     * Unregisters any active event handlers and clears queue settings.
+     * This ensures that only one type of event handling is active at a time.
+     * 
+     * @return esp_err_t ESP_OK on success, error code otherwise
+     */
     esp_err_t GpioInput::_clearEventHandlers(){
         esp_err_t status{ESP_OK};
 
