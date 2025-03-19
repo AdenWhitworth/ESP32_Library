@@ -3,6 +3,23 @@
 namespace GPIO {
     /*================================= GpioInput ==============================*/
     
+    bool GpioInput::_interrupt_service_installed{false};
+
+    ESP_EVENT_DEFINE_BASE(INPUT_EVENTS);
+
+    /**
+     * @brief Interrupt Service Routine callback for GPIO input pins
+     * 
+     * This static callback function is called when a GPIO interrupt occurs.
+     * It posts an event to the event loop with the pin number that triggered the interrupt.
+     * 
+     * @param args Pointer to the pin number that triggered the interrupt
+     */
+    void IRAM_ATTR GpioInput::gpio_isr_callback(void *args){
+        int32_t pin = reinterpret_cast<int32_t>(args);
+        esp_event_isr_post(INPUT_EVENTS, pin, nullptr, 0, nullptr);
+    }
+
     /**
      * @brief Initializes the GPIO input pin with specified configuration.
      * 
@@ -86,6 +103,137 @@ namespace GPIO {
     esp_err_t GpioInput::read() {
         return _active_low ? !gpio_get_level(_pin) : gpio_get_level(_pin);
     }
+
+    /**
+     * @brief Enables internal pull-up resistor for the GPIO input pin
+     * 
+     * @return esp_err_t Status of the operation (ESP_OK on success)
+     */
+    esp_err_t GpioInput::enablePullup(void){
+        return gpio_set_pull_mode(_pin, GPIO_PULLUP_ONLY);
+    }
+
+    /**
+     * @brief Disables internal pull-up resistor for the GPIO input pin
+     * 
+     * @return esp_err_t Status of the operation (ESP_OK on success)
+     */
+    esp_err_t GpioInput::disablePullup(void){
+        return gpio_set_pull_mode(_pin, GPIO_FLOATING);
+    }
+
+    /**
+     * @brief Enables internal pull-down resistor for the GPIO input pin
+     * 
+     * @return esp_err_t Status of the operation (ESP_OK on success)
+     */
+    esp_err_t GpioInput::enablePulldown(void){
+        return gpio_set_pull_mode(_pin, GPIO_PULLDOWN_ONLY);
+    }
+
+    /**
+     * @brief Disables internal pull-down resistor for the GPIO input pin
+     * 
+     * @return esp_err_t Status of the operation (ESP_OK on success)
+     */
+    esp_err_t GpioInput::disablePulldown(void){
+        return gpio_set_pull_mode(_pin, GPIO_FLOATING);
+    }
+
+    /**
+     * @brief Enables both internal pull-up and pull-down resistors for the GPIO input pin
+     * 
+     * @return esp_err_t Status of the operation (ESP_OK on success)
+     */
+    esp_err_t GpioInput::enablePullupPulldown(void){
+        return gpio_set_pull_mode(_pin, GPIO_PULLUP_PULLDOWN);
+    }
+
+    /**
+     * @brief Disables both internal pull-up and pull-down resistors for the GPIO input pin
+     * 
+     * @return esp_err_t Status of the operation (ESP_OK on success)
+     */
+    esp_err_t GpioInput::disablePullupPulldown(void){
+        return gpio_set_pull_mode(_pin, GPIO_FLOATING);
+    }
+
+    /**
+     * @brief Enables interrupt functionality for the GPIO input pin
+     * 
+     * Configures the interrupt type and installs the interrupt service if not already installed.
+     * For active-low inputs, the interrupt type is automatically inverted.
+     * 
+     * @param int_type The type of interrupt to enable (e.g., GPIO_INTR_POSEDGE)
+     * @return esp_err_t Status of the operation (ESP_OK on success)
+     */
+    esp_err_t GpioInput::enableInterrupt(gpio_int_type_t int_type){
+        esp_err_t status{ESP_OK};
+
+        if(_active_low){
+            switch (int_type)
+            {
+            case GPIO_INTR_POSEDGE:
+                int_type = GPIO_INTR_NEGEDGE;
+                break;
+            
+            case GPIO_INTR_NEGEDGE:
+                int_type = GPIO_INTR_POSEDGE;
+                break;
+
+            case GPIO_INTR_LOW_LEVEL:
+                int_type = GPIO_INTR_HIGH_LEVEL;
+                break;
+
+            case GPIO_INTR_HIGH_LEVEL:
+                int_type = GPIO_INTR_LOW_LEVEL;
+                break;
+            
+            default:
+                break;
+            }
+        }
+
+        if (!_interrupt_service_installed) {
+            status = gpio_install_isr_service(0);
+
+            if(status == ESP_OK){
+                _interrupt_service_installed = true;
+            }
+        }
+
+        if (status == ESP_OK){
+            status = gpio_set_intr_type(_pin, int_type);
+        }
+
+        if (status == ESP_OK){
+            status = gpio_isr_handler_add(_pin, gpio_isr_callback, (void *)_pin);
+        }
+
+        return status;
+    }
+
+    /**
+     * @brief Sets an event handler for GPIO input events
+     * 
+     * Registers a callback function to be called when the GPIO input state changes.
+     * The event handler will receive the pin number that triggered the event.
+     * 
+     * @param Gpio_e_h Pointer to the event handler function
+     * @return esp_err_t Status of the operation (ESP_OK on success)
+     */
+    esp_err_t GpioInput::setEventHandler(esp_event_handler_t Gpio_e_h){
+        esp_err_t status{ESP_OK};
+
+        status = esp_event_handler_instance_register(INPUT_EVENTS, _pin, Gpio_e_h, 0, nullptr);
+
+        if(status == ESP_OK){
+            _event_handler_set = true;
+        }
+
+        return status;
+    }
+
 
     /*================================= GpioOutput ==============================*/
 

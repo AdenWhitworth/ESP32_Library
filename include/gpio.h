@@ -2,8 +2,11 @@
 #define GPIO_H
 
 #include "driver/gpio.h"
+#include "esp_event.h"
 
 namespace GPIO {
+
+    ESP_EVENT_DECLARE_BASE(INPUT_EVENTS);
 
     /**
      * @brief Enumeration for GPIO output levels.
@@ -28,7 +31,7 @@ namespace GPIO {
     /**
      * @brief Class for GPIO input control.
      * 
-     * This class allows for reading the state of a GPIO pin.
+     * This class allows for reading the state of a GPIO pin and handling input events.
      */
     class GpioInput : public GpioBase {
         private:
@@ -40,6 +43,8 @@ namespace GPIO {
              * @return esp_err_t Status of the initialization (ESP_OK on success).
              */
             esp_err_t _init(const gpio_num_t pin, const bool activeLow);
+            bool _event_handler_set = false;  ///< Flag indicating if an event handler is registered
+            static bool _interrupt_service_installed;  ///< Flag indicating if the interrupt service is installed
             
         public:
             /**
@@ -83,6 +88,73 @@ namespace GPIO {
              * @return int The state of the GPIO pin (0 or 1).
              */
             int read(void);
+
+            /**
+             * @brief Enables the internal pull-up resistor for the GPIO pin.
+             * 
+             * @return esp_err_t Status of the operation (ESP_OK on success).
+             */
+            esp_err_t enablePullup(void);
+
+            /**
+             * @brief Disables the internal pull-up resistor for the GPIO pin.
+             * 
+             * @return esp_err_t Status of the operation (ESP_OK on success).
+             */
+            esp_err_t disablePullup(void);
+
+            /**
+             * @brief Enables the internal pull-down resistor for the GPIO pin.
+             * 
+             * @return esp_err_t Status of the operation (ESP_OK on success).
+             */
+            esp_err_t enablePulldown(void);
+
+            /**
+             * @brief Disables the internal pull-down resistor for the GPIO pin.
+             * 
+             * @return esp_err_t Status of the operation (ESP_OK on success).
+             */
+            esp_err_t disablePulldown(void);
+
+            /**
+             * @brief Enables both internal pull-up and pull-down resistors for the GPIO pin.
+             * 
+             * @return esp_err_t Status of the operation (ESP_OK on success).
+             */
+            esp_err_t enablePullupPulldown(void);
+
+            /**
+             * @brief Disables both internal pull-up and pull-down resistors for the GPIO pin.
+             * 
+             * @return esp_err_t Status of the operation (ESP_OK on success).
+             */
+            esp_err_t disablePullupPulldown(void);
+
+            /**
+             * @brief Enables interrupt functionality for the GPIO pin.
+             * 
+             * @param int_type The type of interrupt to enable.
+             * @return esp_err_t Status of the operation (ESP_OK on success).
+             */
+            esp_err_t enableInterrupt(gpio_int_type_t int_type);
+
+            /**
+             * @brief Sets an event handler for GPIO input events.
+             * 
+             * @param Gpio_e_h Pointer to the event handler function.
+             * @return esp_err_t Status of the operation (ESP_OK on success).
+             */
+            esp_err_t setEventHandler(esp_event_handler_t Gpio_e_h);
+
+            /**
+             * @brief Static callback function for GPIO interrupts.
+             * 
+             * This function is called when a GPIO interrupt occurs.
+             * 
+             * @param arg Pointer to the pin number that triggered the interrupt.
+             */
+            static void IRAM_ATTR gpio_isr_callback(void* arg);
     };
 
     /**
