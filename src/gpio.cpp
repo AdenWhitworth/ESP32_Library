@@ -3,21 +3,49 @@
 namespace GPIO {
     /*================================= GpioInput ==============================*/
     
+    /**
+     * @brief Static flag indicating if the interrupt service routine is installed.
+     */
     bool GpioInput::_interrupt_service_installed{false};
 
+    /**
+     * @brief Mutex for protecting event handler changes across tasks/cores.
+     */
+    portMUX_TYPE GpioInput::_eventChangeMutex = portMUX_INITIALIZER_UNLOCKED;
+
+    /**
+     * @brief Define the event base for GPIO input events.
+     */
     ESP_EVENT_DEFINE_BASE(INPUT_EVENTS);
 
     /**
-     * @brief Interrupt Service Routine callback for GPIO input pins
+     * @brief ISR callback for GPIO interrupts.
      * 
-     * This static callback function is called when a GPIO interrupt occurs.
-     * It posts an event to the event loop with the pin number that triggered the interrupt.
+     * This function is called from interrupt context when a GPIO event occurs.
+     * It performs type checking and routes the event to the appropriate handler:
+     * queue, custom event loop, or default event handler.
      * 
-     * @param args Pointer to the pin number that triggered the interrupt
+     * @param args Pointer to interrupt_args structure
      */
     void IRAM_ATTR GpioInput::gpio_isr_callback(void *args){
-        int32_t pin = reinterpret_cast<int32_t>(args);
-        esp_event_isr_post(INPUT_EVENTS, pin, nullptr, 0, nullptr);
+        auto* typed_args = reinterpret_cast<interrupt_args*>(args);
+        if (typed_args->type_tag != 0x47504941) {
+            return;
+        }
+        int32_t pin = typed_args->_pin;
+        bool custom_event_handler_set = typed_args->_custom_event_handler_set;
+        bool event_handler_set = typed_args->_event_handler_set;
+        bool queue_enabled = typed_args->_queue_enabled;
+        esp_event_loop_handle_t custom_event_loop_handle = typed_args->_custom_event_loop_handle;
+        QueueHandle_t queue_handle = typed_args->_queue_handle;
+
+        if(queue_enabled){
+            xQueueSendFromISR(queue_handle, &pin, NULL);
+        } else if (custom_event_handler_set){
+            esp_event_isr_post_to(custom_event_loop_handle, INPUT_EVENTS, pin, nullptr, 0, nullptr);
+        } else if (event_handler_set){
+            esp_event_isr_post(INPUT_EVENTS, pin, nullptr, 0, nullptr);
+        }
     }
 
     /**
@@ -214,22 +242,101 @@ namespace GPIO {
     }
 
     /**
-     * @brief Sets an event handler for GPIO input events
+     * @brief Sets the default event handler for GPIO input events.
      * 
-     * Registers a callback function to be called when the GPIO input state changes.
-     * The event handler will receive the pin number that triggered the event.
+     * Registers an event handler for GPIO events using the default event loop.
+     * Any previously set handlers are cleared before setting the new one.
      * 
-     * @param Gpio_e_h Pointer to the event handler function
-     * @return esp_err_t Status of the operation (ESP_OK on success)
+     * @param Gpio_e_h Function pointer to the event handler
+     * @return esp_err_t ESP_OK on success, error code otherwise
      */
     esp_err_t GpioInput::setEventHandler(esp_event_handler_t Gpio_e_h){
         esp_err_t status{ESP_OK};
 
-        status = esp_event_handler_instance_register(INPUT_EVENTS, _pin, Gpio_e_h, 0, nullptr);
+        taskENTER_CRITICAL(&_eventChangeMutex);
+
+        status = _clearEventHandlers();
+
+        status = esp_event_handler_instance_register(INPUT_EVENTS, _interrupt_args._pin, Gpio_e_h, 0, nullptr);
 
         if(status == ESP_OK){
-            _event_handler_set = true;
+            _interrupt_args._event_handler_set = true;
         }
+
+        taskEXIT_CRITICAL(&_eventChangeMutex);
+
+        return status;
+    }
+
+    /**
+     * @brief Sets a custom event handler with a specific event loop.
+     * 
+     * Registers an event handler for GPIO events using a custom event loop.
+     * Any previously set handlers are cleared before setting the new one.
+     * This method is protected by a critical section to ensure thread safety.
+     * 
+     * @param Gpio_e_l Handle to the custom event loop
+     * @param Gpio_e_h Function pointer to the event handler
+     * @return esp_err_t ESP_OK on success, error code otherwise
+     */
+    esp_err_t GpioInput::setEventHandler(esp_event_loop_handle_t Gpio_e_l, esp_event_handler_t Gpio_e_h){
+        esp_err_t status{ESP_OK};
+
+        taskENTER_CRITICAL(&_eventChangeMutex);
+
+        status = _clearEventHandlers();
+
+        status = esp_event_handler_instance_register_with(Gpio_e_l, INPUT_EVENTS, _interrupt_args._pin, Gpio_e_h, 0, nullptr);
+
+        if(status == ESP_OK){
+            _event_handle = Gpio_e_h;
+            _interrupt_args._custom_event_loop_handle = Gpio_e_l;
+            _interrupt_args._event_handler_set = true;
+        }
+
+        taskEXIT_CRITICAL(&_eventChangeMutex);
+
+        return status;
+    }
+
+    /**
+     * @brief Configures a queue to receive GPIO events.
+     * 
+     * Sets up a FreeRTOS queue to receive GPIO events instead of using event handlers.
+     * Any previously set handlers are cleared. This method is protected by a
+     * critical section to ensure thread safety.
+     * 
+     * @param Gpio_e_q Handle to the FreeRTOS queue
+     */
+    void GpioInput::setQueueHandle(QueueHandle_t Gpio_e_q){
+        taskENTER_CRITICAL(&_eventChangeMutex);
+        _clearEventHandlers();
+        _interrupt_args._queue_handle = Gpio_e_q;
+        _interrupt_args._queue_enabled = true;
+        taskEXIT_CRITICAL(&_eventChangeMutex);
+    }
+
+    /**
+     * @brief Clears all event handlers and queue settings.
+     * 
+     * Unregisters any active event handlers and clears queue settings.
+     * This ensures that only one type of event handling is active at a time.
+     * 
+     * @return esp_err_t ESP_OK on success, error code otherwise
+     */
+    esp_err_t GpioInput::_clearEventHandlers(){
+        esp_err_t status{ESP_OK};
+
+        if(_interrupt_args._custom_event_handler_set){
+            esp_event_handler_unregister_with(_interrupt_args._custom_event_loop_handle, INPUT_EVENTS, _interrupt_args._pin, _event_handle);
+            _interrupt_args._custom_event_handler_set = false;
+        } else if (_interrupt_args._event_handler_set){
+            esp_event_handler_instance_unregister(INPUT_EVENTS, _interrupt_args._pin, nullptr);
+            _interrupt_args._event_handler_set = false;
+        }
+
+        _interrupt_args._queue_handle = nullptr;
+        _interrupt_args._queue_enabled = false;
 
         return status;
     }
